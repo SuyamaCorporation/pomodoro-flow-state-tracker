@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ポモドーロ×フロー状態測定タイマー</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  *:focus-visible { outline: 2px solid #ef4444; outline-offset: 2px; }
+  .ring-progress { transition: stroke-dashoffset 1s linear; }
+  .fade-in { animation: fadeIn 0.25s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+</style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+<div class="max-w-3xl mx-auto px-4 py-8">
+  <h1 class="text-2xl font-bold text-red-400 mb-1">ポモドーロ×フロー状態タイマー</h1>
+  <p class="text-gray-400 text-sm mb-6">集中度を記録してどの時間帯・タスクで最も集中できるかを分析</p>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <!-- Timer -->
+    <div class="bg-gray-900 rounded-xl p-6 flex flex-col items-center">
+      <div class="flex gap-2 mb-4">
+        <button data-mode="work" data-min="25" class="mode-btn bg-red-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium">作業 25分</button>
+        <button data-mode="short" data-min="5" class="mode-btn bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-sm">短休憩 5分</button>
+        <button data-mode="long" data-min="15" class="mode-btn bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-sm">長休憩 15分</button>
+      </div>
+
+      <div class="relative mb-4" style="width:160px;height:160px;">
+        <svg width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="タイマー">
+          <circle cx="80" cy="80" r="70" fill="none" stroke="#374151" stroke-width="8"/>
+          <circle id="timerRing" cx="80" cy="80" r="70" fill="none" stroke="#ef4444" stroke-width="8"
+            stroke-linecap="round" stroke-dasharray="439.8" stroke-dashoffset="0"
+            transform="rotate(-90 80 80)" class="ring-progress"/>
+        </svg>
+        <div class="absolute inset-0 flex flex-col items-center justify-center">
+          <div id="timerDisplay" class="text-4xl font-bold font-mono text-white">25:00</div>
+          <div id="timerMode" class="text-xs text-gray-400 mt-1">作業</div>
+        </div>
+      </div>
+
+      <div class="flex gap-3 mb-4">
+        <button id="startBtn" class="bg-red-600 hover:bg-red-500 text-white px-6 py-2.5 rounded-xl font-bold transition" aria-label="タイマー開始">開始</button>
+        <button id="resetBtn" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2.5 rounded-xl transition" aria-label="リセット">リセット</button>
+      </div>
+
+      <div class="text-center">
+        <div class="text-sm text-gray-400">タスク種別</div>
+        <div class="flex gap-2 mt-1 flex-wrap justify-center" id="taskTypeBtns">
+          <button data-type="コーディング" class="task-type-btn bg-blue-700 text-white px-2 py-1 rounded text-xs">コーディング</button>
+          <button data-type="ライティング" class="task-type-btn bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs">ライティング</button>
+          <button data-type="会議" class="task-type-btn bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs">会議</button>
+          <button data-type="その他" class="task-type-btn bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs">その他</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="bg-gray-900 rounded-xl p-5 space-y-4">
+      <div class="grid grid-cols-3 gap-3 text-center">
+        <div class="bg-gray-800 rounded-lg p-3">
+          <div id="totalPomodoros" class="text-2xl font-bold text-red-400">0</div>
+          <div class="text-xs text-gray-500 mt-0.5">累計ポモドーロ</div>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-3">
+          <div id="totalFocusHours" class="text-2xl font-bold text-orange-400">0</div>
+          <div class="text-xs text-gray-500 mt-0.5">累計集中時間(h)</div>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-3">
+          <div id="avgFlowScore" class="text-2xl font-bold text-yellow-400">—</div>
+          <div class="text-xs text-gray-500 mt-0.5">平均集中度</div>
+        </div>
+      </div>
+
+      <div>
+        <h2 class="text-xs font-semibold text-gray-400 mb-2">タスク種別ごとの平均集中度</h2>
+        <div id="taskBarChart" class="space-y-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Heatmap -->
+  <div class="bg-gray-900 rounded-xl p-5 mb-6">
+    <h2 class="text-sm font-semibold text-gray-300 mb-3">週次ヒートマップ（時間帯 × 曜日）</h2>
+    <div id="heatmap" class="overflow-x-auto"></div>
+    <div class="mt-2 flex gap-2 text-xs text-gray-500 items-center">
+      <span>低</span>
+      <span class="flex gap-1">
+        <span class="inline-block w-4 h-4 rounded bg-gray-800 border border-gray-700"></span>
+        <span class="inline-block w-4 h-4 rounded bg-red-900"></span>
+        <span class="inline-block w-4 h-4 rounded bg-red-700"></span>
+        <span class="inline-block w-4 h-4 rounded bg-red-500"></span>
+        <span class="inline-block w-4 h-4 rounded bg-red-300"></span>
+      </span>
+      <span>高</span>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div id="modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
+  <div class="fade-in bg-gray-900 rounded-2xl p-6 w-full max-w-sm">
+    <h2 class="text-lg font-bold text-white mb-1">セッション完了！</h2>
+    <p class="text-sm text-gray-400 mb-4">このセッションを評価してください</p>
+    <div class="mb-4">
+      <label class="block text-sm text-gray-300 mb-2">集中度（1〜5）</label>
+      <div id="flowStars" class="flex gap-2" role="group" aria-label="集中度評価"></div>
+    </div>
+    <div class="mb-5">
+      <label class="block text-sm text-gray-300 mb-2">タスク種別</label>
+      <div id="modalTaskType" class="text-sm font-medium text-blue-400"></div>
+    </div>
+    <button id="saveSessionBtn" class="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2.5 rounded-xl transition">記録して次へ</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const MODES = { work:{min:25,label:'作業'}, short:{min:5,label:'短休憩'}, long:{min:15,label:'長休憩'} };
+  const TASK_TYPES = ['コーディング','ライティング','会議','その他'];
+  const CIRCUMFERENCE = 2 * Math.PI * 70;
+
+  let currentMode = 'work';
+  let currentTask = 'コーディング';
+  let totalSec = 25 * 60;
+  let remainSec = 25 * 60;
+  let running = false;
+  let timer = null;
+  let selectedFlow = 3;
+  let sessions = [];
+
+  function loadSessions() {
+    try { sessions = JSON.parse(localStorage.getItem('pomodoro_v1') || '[]'); } catch(e) { sessions = []; }
+  }
+  function saveSessions() { localStorage.setItem('pomodoro_v1', JSON.stringify(sessions.slice(0, 500))); }
+
+  function formatTime(sec) {
+    const m = Math.floor(sec / 60).toString().padStart(2,'0');
+    const s = (sec % 60).toString().padStart(2,'0');
+    return `${m}:${s}`;
+  }
+
+  function updateDisplay() {
+    document.getElementById('timerDisplay').textContent = formatTime(remainSec);
+    const pct = 1 - remainSec / totalSec;
+    const offset = CIRCUMFERENCE * pct;
+    document.getElementById('timerRing').style.strokeDashoffset = offset;
+  }
+
+  function setMode(mode) {
+    currentMode = mode;
+    totalSec = MODES[mode].min * 60;
+    remainSec = totalSec;
+    document.getElementById('timerMode').textContent = MODES[mode].label;
+    document.querySelectorAll('.mode-btn').forEach(b => {
+      const active = b.dataset.mode === mode;
+      b.className = `mode-btn px-3 py-1.5 rounded-lg text-sm font-medium transition ${active ? 'bg-red-700 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`;
+    });
+    document.getElementById('timerRing').style.stroke = mode === 'work' ? '#ef4444' : mode === 'short' ? '#3b82f6' : '#10b981';
+    updateDisplay();
+    stopTimer();
+    document.getElementById('startBtn').textContent = '開始';
+  }
+
+  function stopTimer() {
+    running = false;
+    clearInterval(timer);
+  }
+
+  function startTimer() {
+    running = true;
+    document.getElementById('startBtn').textContent = '一時停止';
+    timer = setInterval(() => {
+      remainSec--;
+      updateDisplay();
+      if (remainSec <= 0) {
+        stopTimer();
+        onTimerEnd();
+      }
+    }, 1000);
+  }
+
+  function onTimerEnd() {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('ポモドーロ完了！', { body: `${MODES[currentMode].label}セッション終了`, icon: '' });
+    }
+    if (currentMode === 'work') {
+      showModal();
+    }
+  }
+
+  function showModal() {
+    selectedFlow = 3;
+    document.getElementById('modalTaskType').textContent = currentTask;
+    renderStars();
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function renderStars() {
+    const el = document.getElementById('flowStars');
+    el.innerHTML = '';
+    for (let i = 1; i <= 5; i++) {
+      const btn = document.createElement('button');
+      btn.className = `text-3xl transition ${i <= selectedFlow ? 'text-yellow-400' : 'text-gray-600'} hover:scale-110`;
+      btn.textContent = '★';
+      btn.setAttribute('aria-label', `集中度${i}`);
+      btn.addEventListener('click', () => { selectedFlow = i; renderStars(); });
+      el.appendChild(btn);
+    }
+  }
+
+  document.getElementById('saveSessionBtn').addEventListener('click', () => {
+    const now = new Date();
+    sessions.push({
+      date: now.toISOString().slice(0,10),
+      hour: now.getHours(),
+      dow: now.getDay(),
+      flow: selectedFlow,
+      task: currentTask,
+      mode: currentMode,
+      ts: now.toISOString()
+    });
+    saveSessions();
+    document.getElementById('modal').classList.add('hidden');
+    renderStats();
+    setMode('short');
+  });
+
+  document.getElementById('startBtn').addEventListener('click', () => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+    if (running) { stopTimer(); document.getElementById('startBtn').textContent = '再開'; }
+    else { startTimer(); }
+  });
+
+  document.getElementById('resetBtn').addEventListener('click', () => { stopTimer(); setMode(currentMode); document.getElementById('startBtn').textContent = '開始'; });
+
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.addEventListener('click', () => setMode(b.dataset.mode));
+  });
+
+  document.querySelectorAll('.task-type-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      currentTask = b.dataset.type;
+      document.querySelectorAll('.task-type-btn').forEach(bb => {
+        const active = bb.dataset.type === currentTask;
+        bb.className = `task-type-btn px-2 py-1 rounded text-xs transition ${active ? 'bg-blue-700 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`;
+      });
+    });
+  });
+
+  function renderStats() {
+    const workSessions = sessions.filter(s => s.mode === 'work');
+    document.getElementById('totalPomodoros').textContent = workSessions.length;
+    document.getElementById('totalFocusHours').textContent = (workSessions.length * 25 / 60).toFixed(1);
+    if (workSessions.length > 0) {
+      const avg = workSessions.reduce((a,s) => a + s.flow, 0) / workSessions.length;
+      document.getElementById('avgFlowScore').textContent = avg.toFixed(1);
+    }
+
+    // Task bar chart
+    const chartEl = document.getElementById('taskBarChart');
+    chartEl.innerHTML = '';
+    TASK_TYPES.forEach(type => {
+      const typeSessions = workSessions.filter(s => s.task === type);
+      if (typeSessions.length === 0) return;
+      const avg = typeSessions.reduce((a,s) => a + s.flow, 0) / typeSessions.length;
+      const pct = (avg / 5) * 100;
+      const div = document.createElement('div');
+      div.className = 'flex items-center gap-2 text-xs';
+      div.innerHTML = `
+        <span class="w-20 text-gray-400 text-right">${type}</span>
+        <div class="flex-1 bg-gray-800 rounded h-3 overflow-hidden">
+          <div class="h-3 rounded bg-red-500 transition-all" style="width:${pct}%"></div>
+        </div>
+        <span class="text-gray-300 w-8">${avg.toFixed(1)}</span>
+      `;
+      chartEl.appendChild(div);
+    });
+
+    renderHeatmap(workSessions);
+  }
+
+  function renderHeatmap(workSessions) {
+    const el = document.getElementById('heatmap');
+    // Build 7days x hours grid
+    const days = ['日','月','火','水','木','金','土'];
+    const hours = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22];
+
+    // Last 7 days
+    const last7 = new Set();
+    for (let i=0;i<7;i++) { const d=new Date(); d.setDate(d.getDate()-i); last7.add(d.toISOString().slice(0,10)); }
+    const recent = workSessions.filter(s => last7.has(s.date));
+
+    const grid = {};
+    recent.forEach(s => {
+      const key = `${s.dow}_${s.hour}`;
+      if (!grid[key]) grid[key] = [];
+      grid[key].push(s.flow);
+    });
+
+    let html = '<table class="text-xs border-collapse"><thead><tr><th class="p-1 text-gray-500 w-8"></th>';
+    days.forEach(d => { html += `<th class="p-1 text-gray-500 text-center w-8">${d}</th>`; });
+    html += '</tr></thead><tbody>';
+
+    hours.forEach(h => {
+      html += `<tr><td class="p-1 text-gray-500 text-right pr-2">${h}</td>`;
+      days.forEach((_, dow) => {
+        const key = `${dow}_${h}`;
+        const vals = grid[key];
+        const avg = vals ? vals.reduce((a,v)=>a+v,0)/vals.length : 0;
+        let bg = 'bg-gray-800';
+        if (avg > 0) bg = avg < 2 ? 'bg-red-900' : avg < 3 ? 'bg-red-700' : avg < 4 ? 'bg-red-500' : 'bg-red-300';
+        const title = vals ? `平均 ${avg.toFixed(1)} (${vals.length}件)` : '';
+        html += `<td class="p-0.5"><div class="w-7 h-7 rounded ${bg}" title="${title}"></div></td>`;
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }
+
+  loadSessions();
+  setMode('work');
+  renderStats();
+})();
+</script>
+</body>
+</html>
